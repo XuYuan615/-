@@ -1,0 +1,141 @@
+type point.
+type key.
+free Sec:channel [private].		(*secure channel*)
+free Pub:channel.				(*public channel*)
+(*Names & Variables*)
+const P:point.
+free Ppub:point.
+free IDu:bitstring.
+free IDms1:bitstring.
+free IDms2:bitstring.
+free Xu:point.
+free Ru:point.
+free Xms1:point.
+free Rms1:point.
+free Xms2:point.
+free Rms2:point.
+free xu:bitstring [private].
+free xms1:bitstring [private].
+free xms2:bitstring [private].
+free s:bitstring [private].
+free SK:bitstring [private].
+free SK':bitstring [private].
+(*Constructors, Destructors & Equations*)
+fun H1(bitstring,point,point):bitstring.
+fun H2(bitstring,point):bitstring.
+fun H3(bitstring):bitstring.
+fun H4(bitstring,point,point,bitstring):bitstring.
+fun H5(bitstring,bitstring,point,point,bitstring):bitstring.
+fun H6(point,bitstring,bitstring,point):bitstring.
+fun H7(bitstring):key.
+fun Matrix(bitstring,bitstring):bitstring.
+fun senc(key,bitstring):bitstring.
+fun sdec(key,bitstring):bitstring.
+fun XOR(bitstring,bitstring):bitstring.
+fun xor(key,key):key.
+fun search(bitstring):key.
+fun ADD(bitstring,bitstring):bitstring.
+fun PA(point,point):point.	 (*point addition*)
+fun MULT(bitstring,bitstring):bitstring.(*multiplication*)	
+fun ECPM(bitstring,point):point.(*elliptic curve point multiplication*)
+fun CONCAT(bitstring,bitstring):bitstring.
+fun concat(key,bitstring):bitstring.
+equation forall a:bitstring, b:bitstring; XOR(XOR(a,b),b)=a.
+equation forall a:key, b:key; xor(xor(a,b),b)=a.
+equation forall m:bitstring, k:key; sdec(k,senc(k,m))=m.
+(*Event*)
+event beginUserU(bitstring).
+event endUserU(bitstring).
+event beginServerS(bitstring).
+event endServerS(bitstring).
+(*Queries*)
+query attacker(SK).
+query attacker(SK').
+query id:bitstring; inj-event (endUserU(id)) ==> inj-event(beginUserU(id)).
+query id:bitstring; inj-event (endServerS(id)) ==> inj-event(beginServerS(id)).
+(*Processes*)
+(*RC Processes*)
+let UserReg=
+	in(Sec,(IDu:bitstring,Xu:point));
+	new ru:bitstring;
+	let Ru = ECPM(ru,P) in
+	let Hu = H1(IDu,Xu,Ru) in
+	let yu = ADD(ru,MULT(s,Hu)) in
+	out(Sec,(yu,Ru));
+	0.
+let ServerReg=
+	in(Sec,(IDms:bitstring,Xms:point));
+	new rms:bitstring;
+	let Rms = ECPM(rms,P) in
+	let Hms = H1(IDms,Xms,Rms) in
+	let yms = ADD(rms,MULT(s,Hms)) in
+	out(Sec,(yms,Rms));
+	0.
+let RC=UserReg | ServerReg.
+(*User Processes*)
+let UserU=
+	(*Registration*)
+	out(Sec,(IDu,Xu));
+	in(Sec,(yu:bitstring,Ru:point));
+	(*Login & Authentication*)
+	event beginUserU(IDu);
+	new a:bitstring;
+	new b:bitstring;
+	let A = ECPM(a,P) in
+	let B = ECPM(b,P) in
+	let M1 = ECPM(b,PA(Xms1,PA(Rms1,ECPM(H1(IDms1,Xms1,Rms1),Ppub)))) in
+	let M2 = ECPM(b,PA(Xms2,PA(Rms2,ECPM(H1(IDms2,Xms2,Rms2),Ppub)))) in
+	let lambda1 = H2(IDms1,M1) in
+	let lambda2 = H2(IDms2,M2) in
+	new r1:bitstring;
+	new r2:bitstring;
+	let lambda = CONCAT(lambda1,lambda2) in 
+	let r = CONCAT(r1,r2) in 
+	let W = Matrix(lambda,r) in 
+	let pi1 = H3(r1) in 
+	let pi2 = H3(r2) in 
+	new k:key;
+	let C = senc(k,CONCAT(IDu,(A,Ru,Xu))) in 
+	let L1 = xor(H7(r1),k) in 
+	let L2 = xor(H7(r2),k) in
+	let tau1 = concat(L1,pi1) in 
+	let tau2 = concat(L2,pi2) in
+	let tau = CONCAT(tau1,tau2) in 
+	new Tu:bitstring;
+	let sigma = ADD(MULT(a,H4(IDu,A,Ru,Tu)),(yu,xu)) in
+	out(Pub,(B,C,W,tau,sigma,Tu));
+	in(Pub,(eta:bitstring,D:point,Tms1:bitstring));
+	if(eta = CONCAT(pi1,H5(IDu,IDms1,A,D,Tms1)))  then
+	let theta = ECPM(ADD(yu,MULT(a,eta)),D) in
+	let SK = H6(theta,IDu,IDms1,ECPM(xu,Xms1)) in
+	event endUserU(IDu)
+	else 0.
+(*Server Processes*)
+let Server1=
+	out(Sec,(IDms1,Xms1));
+	in(Sec,(yms1:bitstring,Rms1:point));
+	(*login & Authentication*)
+	event beginServerS(IDms1);
+	in(Pub,(B:point,C:bitstring,W:bitstring,tau:bitstring,sigma:bitstring,Tu:bitstring));
+	let M1' = ECPM(ADD(xms1,yms1),B) in
+	let lambda1 = H2(IDms1,M1') in 
+	let r1 = Matrix(W,lambda1) in
+	let pi1 = H3(r1) in 
+	let L1 = search(pi1) in 
+	let k' =xor(H7(r1),L1) in 
+	let (IDu':bitstring,A':point,Ru':point,Xu':point) = sdec(k',C) in 
+	let F = PA(Xu',PA(Ru,ECPM(H1(IDu',Xu',Ru'),Ppub))) in
+	if ECPM(sigma,P) = PA(ECPM(H4(IDu',A',Ru',Tu),A'),F) then
+	new d:bitstring;
+	let D = ECPM(d,P) in
+	new Tms1:bitstring;
+	let eta = H5(IDu',IDms1,A',D,Tms1) in
+	let theta' = ECPM(d,PA(F,ECPM(eta,A'))) in
+	let SK' = H6(theta',IDu',IDms1,ECPM(xms1,Xu')) in
+	out(Pub,(eta,D,Tms1));
+	event endServerS(IDms1)
+	else 0.
+
+(*Processes Replication*)
+process 
+(!UserU | !Server1 | !RC)
